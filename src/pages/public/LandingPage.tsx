@@ -75,7 +75,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
       a: 'Each cycle week runs Monday 00:00 GMT to Sunday 23:59 GMT. On Sunday evening, once daily collections are verified, the full accumulated pool is disbursed directly to the scheduled recipient via their registered Mobile Money wallet or bank account.',
     },
   ];
-
+  // Sample rotation for roadmap display
+  const sampleRotation = [
+    { week: 1, recipient: 'Ama K.', amount: 700, status: 'Completed ✓', date: 'Mon 12 - Sun 18 May' },
+    { week: 2, recipient: 'Kwame A.', amount: 700, status: 'Completed ✓', date: 'Mon 19 - Sun 25 May' },
+    { week: 3, recipient: 'You (Next)', amount: 700, status: 'Active - Payout This Sun', date: 'Mon 26 May - Sun 1 Jun' },
+    { week: 4, recipient: 'Efua M.', amount: 700, status: 'Queued', date: 'Mon 2 - Sun 8 Jun' },
+    { week: 5, recipient: 'Kojo B.', amount: 700, status: 'Queued', date: 'Mon 9 - Sun 15 Jun' },
+  ];
 
   return (
     <div className="landing-page">
