@@ -451,12 +451,23 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return INITIAL_POSTS;
   });
 
-  // STRICT MULTI-AGENT ISOLATION: Resolve active group strictly without cross-agent leaking
+   const FALLBACK_GROUP: SusuGroup = {
+    id: 'fallback-platform-group',
+    agentId: activeAgentId || '',
+    name: 'Platform Default Group',
+    fixedDailyAmount: 50,
+    currency: 'GH₵',
+    cycleStartDate: getNearestMonday(),
+    status: 'active',
+    createdAt: formatDateStr(new Date()),
+    paystackPublicKey: ''
+  };
+
   const group: SusuGroup | null = (() => {
-    if (groups.length === 0) return null;
+    if (groups.length === 0) return FALLBACK_GROUP;
     if (currentUserRole === 'agent') {
       const agentGroups = groups.filter(g => g.agentId === activeAgentId);
-      if (agentGroups.length === 0) return null; // STRICT: If agent has no circles, group is null. Never leak another agent's group!
+      if (agentGroups.length === 0) return FALLBACK_GROUP;
       const selected = agentGroups.find(g => g.id === activeGroupId);
       if (selected) return selected;
       return agentGroups[0];
@@ -468,10 +479,10 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (memberGroup) return memberGroup;
       }
       const selected = groups.find(g => g.id === activeGroupId);
-      return selected || groups[0] || null;
+      return selected || groups[0] || FALLBACK_GROUP;
     }
     const selected = groups.find(g => g.id === activeGroupId);
-    return selected || groups[0] || null;
+    return selected || groups[0] || FALLBACK_GROUP;
   })();
 
   const myGroups = groups.filter(g => g.agentId === activeAgentId);
