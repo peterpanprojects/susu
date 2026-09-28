@@ -573,26 +573,21 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   }, []);
 
-  useEffect(() => {
+    useEffect(() => {
     if (!isDbLoaded) return;
-    const stateToSave = {
-      group,
-      groups,
-      activeGroupId,
-      members,
-      payments,
-      posts,
-      agentAccount,
-      agents,
-      agentPaymentConfig,
-      agentPaymentConfigs,
-      platformPaymentConfig,
-      liveSupportConfig,
-      notifications
-    };
-    DatabaseService.persistState(stateToSave as any).catch(err => console.warn('DB sync:', err));
-    localStorage.setItem('susu_current_role', currentUserRole);
-  }, [isDbLoaded, group, groups, activeGroupId, members, payments, posts, agentAccount, agents, agentPaymentConfig, agentPaymentConfigs, platformPaymentConfig, liveSupportConfig, notifications, currentUserRole]);
+    const timeout = setTimeout(() => {
+      const stateToSave = {
+        group, groups, activeGroupId, members, payments, posts,
+        agentAccount, agents, agentPaymentConfig, agentPaymentConfigs,
+        platformPaymentConfig, liveSupportConfig, notifications
+      };
+      // Don't save to localStorage heavy object anymore - only role
+      localStorage.setItem('susu_current_role', currentUserRole);
+      // Only sync important tables to supabase, debounced
+      DatabaseService.persistState(stateToSave as any).catch(err => console.warn('DB sync:', err));
+    }, 1000); // wait 1 sec
+    return () => clearTimeout(timeout);
+  }, [isDbLoaded, groups, members, payments, agents, platformPaymentConfig]);
 
   // FIXED: Derive Active User correctly - Super Admin NEVER shows agent name
   const getActiveUser = (): User => {
