@@ -659,49 +659,40 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setGroups(prev => prev.map(g => g.id === targetId ? { ...g, ...settings } : g));
   };
 
- const updatePlatformPaymentConfig = async (config: Partial<SuperAdminPaymentConfig>) => {
-    const prev = platformPaymentConfig;
-    const next = {...prev,...config };
-    setPlatformPaymentConfig(next);
-    if (config.agentActivationFee!== undefined) {
+  const updatePlatformPaymentConfig = async (config: Partial<SuperAdminPaymentConfig>) => {
+    setPlatformPaymentConfig(prev => {
+      const next = {...prev,...config };
+      // Save to Supabase immediately
+      (async () => {
+        try {
+          const { supabase } = await import('../services/db');
+          if (!supabase) return;
+          const dbConfig = {
+            provider: next.provider,
+            paymentMode: next.paymentMode,
+            gatewayStatus: next.gatewayStatus,
+            storeCheckoutType: next.storeCheckoutType,
+            publicKey: next.masterPublicKey || next.publicKey,
+            secretKey: next.masterSecretKey || next.secretKey,
+            webhookSecret: next.webhookSecret,
+            environment: next.environment,
+            masterPublicKey: next.masterPublicKey || next.masterSecretKey ? next.masterPublicKey : next.publicKey,
+            masterSecretKey: next.masterSecretKey || next.secretKey,
+            platformTreasuryAccount: (next as any).platformTreasuryAccount || '',
+            globalPlatformFeePercent: next.globalPlatformFeePercent,
+            agentActivationFee: next.agentActivationFee,
+          };
+          const { error } = await supabase
+            .from('payment_configs')
+            .upsert({ entity_type: 'super_admin', config: dbConfig }, { onConflict: 'entity_type' });
+          if (error) console.error('Save error:', error);
+          else console.log('✅ Saved to payment_configs super_admin');
+        } catch (e) { console.error(e); }
+      })();
+      return next;
+    });
+    if (config.agentActivationFee !== undefined) {
       updatePlatformSettings({ agentActivationFee: config.agentActivationFee });
-    }
-
-    // SAVE TO SUPABASE payment_configs with allowed entity_type
-    try {
-      const { supabase } = await import('../services/supabase');
-      if (supabase) {
-        const dbConfig = {
-          provider: next.provider,
-          paymentMode: next.paymentMode,
-          gatewayStatus: next.gatewayStatus,
-          storeCheckoutType: next.storeCheckoutType,
-          publicKey: next.masterPublicKey || next.publicKey,
-          secretKey: next.masterSecretKey || next.secretKey,
-          webhookSecret: next.webhookSecret,
-          environment: next.environment,
-          masterPublicKey: next.masterPublicKey,
-          masterSecretKey: next.masterSecretKey,
-          platformTreasuryAccount: (next as any).platformTreasuryAccount || '',
-          commission_percent: next.globalPlatformFeePercent,
-          live_mode: next.environment === 'live'
-        };
-
-        const { error } = await supabase
-         .from('payment_configs')
-         .upsert(
-            {
-              entity_type: 'super_admin', // ✅ Only allowed value is super_admin or agent
-              config: dbConfig
-            },
-            { onConflict: 'entity_type' }
-          );
-
-        if (error) console.error('Supabase save error:', error);
-        else console.log('Saved to payment_configs super_admin ✅');
-      }
-    } catch (e) {
-      console.error('Failed to save platform config to DB', e);
     }
   };
 
