@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useSusu } from '../../context/SusuContext';
 import { ShieldCheck, CheckCircle2, User, Phone, Key, ArrowRight, Lock, Eye, EyeOff } from 'lucide-react';
-
+import { supabase } from '../../services/db';
 interface InviteAcceptPageProps {
   token: string;
   onNavigate: (path: string) => void;
@@ -38,19 +38,41 @@ export const InviteAcceptPage: React.FC<InviteAcceptPageProps> = ({ token, onNav
   const [selectedSlot, setSelectedSlot] = useState<number>(matchingMember.positionInRotation || 1);
   const [accepted, setAccepted] = useState(false);
 
-  const handleAccept = (e: React.FormEvent) => {
+    const handleAccept = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // 🔥 BURN THE LINK FIRST - Check if already used in Supabase
+    const { data: inviteRow } = await supabase
+      .from('group_invites')
+      .select('*')
+      .eq('token', token)
+      .single();
+
+    if (!inviteRow) {
+      alert("This invite does not exist in database. Create it from Agent side.");
+      return;
+    }
+
+    if (inviteRow.status !== 'pending') {
+      alert("❌ This link has already been used! Ask Agent for a new one.");
+      return;
+    }
+
     if (selectedSlot) {
       selectRotationSlot(matchingMember.id, selectedSlot, 'super_admin');
     }
+    
     acceptInviteToken(token, name, phone);
+    
+    // 🔥 THIS IS WHERE YOU PASTE - Burn after accept
+    await supabase.from('group_invites').update({ status: 'used' }).eq('token', token);
+
     setAccepted(true);
     setTimeout(() => {
       setRole('member', matchingMember.id);
       onNavigate('/member/dashboard');
     }, 1500);
   };
-
   return (
     <div style={{ maxWidth: '480px', margin: '3rem auto' }}>
       <div className="card" style={{ padding: '2.5rem 2rem' }}>

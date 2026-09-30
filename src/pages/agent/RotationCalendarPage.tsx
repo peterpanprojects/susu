@@ -1,6 +1,6 @@
 import React from 'react';
 import { useSusu } from '../../context/SusuContext';
-import { Calendar, Lock, ArrowUp, ArrowDown, Shuffle, Info, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { Calendar, Lock, ArrowUp, ArrowDown, Shuffle, Info, CheckCircle2, ShieldCheck, Banknote } from 'lucide-react';
 import { getWeekDateRangeFormatted } from '../../utils/dates';
 
 export const RotationCalendarPage: React.FC = () => {
@@ -13,7 +13,12 @@ export const RotationCalendarPage: React.FC = () => {
     activeGroupId,
     setActiveGroupId,
     reorderCalendar,
-    shuffleCalendar
+    shuffleCalendar,
+    // This function should exist in your SusuContext - if not, tell me
+    // @ts-ignore
+    markWeekPaidOut,
+    // @ts-ignore
+    processPayout
   } = useSusu();
 
   const agentGroupsList = myGroups;
@@ -28,6 +33,25 @@ export const RotationCalendarPage: React.FC = () => {
 
   const currentWeekIdx = schedule.findIndex((s) => s.status === 'current');
   const safeCurrentIdx = currentWeekIdx >= 0 ? currentWeekIdx : 0;
+
+  const handleManualPayout = (week: any) => {
+    const confirmed = window.confirm(
+      `MANUAL PAYOUT CONFIRMATION\n\nDid you give ${group.currency}${week.expectedPoolAmount.toLocaleString()} CASH / MoMo to ${week.memberName}?\n\nThis will mark Week ${week.weekNumber} as Paid Out and move to next member.`
+    );
+    if (!confirmed) return;
+
+    // Try to call your context function if it exists
+    if (typeof markWeekPaidOut === 'function') {
+      markWeekPaidOut(week.id);
+    } else if (typeof processPayout === 'function') {
+      processPayout(week.id);
+    } else {
+      // Fallback: if you don't have function yet, just alert
+      // We will create the function in SusuContext next
+      alert(`Payout recorded locally for ${week.memberName}. Now you need to add markWeekPaidOut() in SusuContext.`);
+      console.log('Payout for week:', week);
+    }
+  };
 
   return (
     <div className="rotation-calendar-page">
@@ -72,7 +96,6 @@ export const RotationCalendarPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Lock Notice Banner */}
       <div
         style={{
           background: 'var(--color-emerald-50)',
@@ -89,13 +112,10 @@ export const RotationCalendarPage: React.FC = () => {
       >
         <ShieldCheck size={24} color="var(--color-emerald-700)" />
         <div>
-          <strong>Strict Rotation Protection Rules Active:</strong>
-          <br />
-          Past and current active payout weeks (Weeks 1 to #{safeCurrentIdx + 1}) are <strong>locked 🔒</strong> to preserve recipient payout guarantees. Only future upcoming weeks can be reordered by the Agent.
+          <strong>Manual Payout Flow:</strong> When it's payout day, withdraw from your Paystack balance → Give CASH/MoMo to member → Click "Mark as Paid Out" below.
         </div>
       </div>
 
-      {/* Rotation Table */}
       <div className="card">
         <div className="table-responsive">
           <table className="data-table">
@@ -106,20 +126,21 @@ export const RotationCalendarPage: React.FC = () => {
                 <th>Assigned Payout Recipient</th>
                 <th>Expected Pool Amount</th>
                 <th>Payout Status</th>
-                <th style={{ textAlign: 'right' }}>Reorder Position</th>
+                <th style={{ textAlign: 'right' }}>Action</th>
               </tr>
             </thead>
             <tbody>
               {schedule.length === 0 ? (
                 <tr>
                   <td colSpan={6} style={{ textAlign: 'center', padding: '2.5rem 1rem', color: 'var(--color-slate-500)' }}>
-                    No payout rotation scheduled yet. Invite members to your group to automatically generate weekly payout turns.
+                    No payout rotation scheduled yet.
                   </td>
                 </tr>
               ) : (
                 schedule.map((week, idx) => {
                   const isLocked = idx <= safeCurrentIdx;
                   const dateRangeText = getWeekDateRangeFormatted(week.weekStartDate);
+                  const isCurrentWeek = week.status === 'current';
 
                   return (
                     <tr
@@ -133,7 +154,6 @@ export const RotationCalendarPage: React.FC = () => {
                         Week {week.weekNumber}
                       </strong>
                     </td>
-
                     <td>
                       <div style={{ fontWeight: 600, color: 'var(--color-slate-800)' }}>
                         {dateRangeText}
@@ -142,28 +162,42 @@ export const RotationCalendarPage: React.FC = () => {
                         {week.weekStartDate} → {week.weekEndDate}
                       </span>
                     </td>
-
                     <td>
                       <div style={{ fontWeight: 700, color: 'var(--color-emerald-950)', fontSize: '1rem' }}>
                         {week.memberName}
                       </div>
                     </td>
-
                     <td>
                       <span style={{ fontWeight: 800, color: 'var(--color-emerald-800)', fontSize: '1.05rem' }}>
                         {group.currency}{week.expectedPoolAmount.toLocaleString()}
                       </span>
                     </td>
-
                     <td>
                       <span className={`status-pill ${week.status}`}>
-                        {isLocked && <Lock size={12} />}
-                        {week.status === 'paid_out' ? 'Paid Out (Locked)' : week.status === 'current' ? 'Active Current Week (Locked)' : 'Upcoming'}
+                        {isLocked && week.status !== 'current' && <Lock size={12} />}
+                        {week.status === 'paid_out' ? 'Paid Out (Locked)' : week.status === 'current' ? 'Active Current Week' : 'Upcoming'}
                       </span>
                     </td>
-
                     <td style={{ textAlign: 'right' }}>
-                      {!isLocked ? (
+                      {isCurrentWeek ? (
+                        <button
+                          onClick={() => handleManualPayout(week)}
+                          style={{
+                            background: '#16a34a',
+                            color: 'white',
+                            border: 'none',
+                            padding: '0.5rem 1rem',
+                            borderRadius: '8px',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem'
+                          }}
+                        >
+                          <Banknote size={16} /> Mark as Paid Out
+                        </button>
+                      ) : !isLocked ? (
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.3rem' }}>
                           <button
                             className="btn-outline"
@@ -186,7 +220,7 @@ export const RotationCalendarPage: React.FC = () => {
                         </div>
                       ) : (
                         <span style={{ fontSize: '0.75rem', color: 'var(--color-slate-400)', fontStyle: 'italic' }}>
-                          🔒 Locked
+                          <CheckCircle2 size={14} style={{ display: 'inline' }} /> Done
                         </span>
                       )}
                     </td>

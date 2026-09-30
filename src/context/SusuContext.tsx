@@ -65,8 +65,7 @@ export interface SusuContextType {
   deleteAgent: (agentIdOrOptions?: string | { resetGroup?: boolean }, options?: { resetGroup?: boolean }) => void;
   updateMemberProfile: (memberId: string, partial: Partial<GroupMember>) => void;
   loginWithUniqueCode: (code: string) => boolean;
-  inviteMember: (name: string, email: string, phone: string) => { token: string; inviteUrl: string; uniqueCode: string };
-  acceptInviteToken: (token: string, name: string, phone: string) => boolean;
+  inviteMember: (name: string, email: string, phone: string) => Promise<{ token: string; inviteUrl: string; uniqueCode: string }>;
   removeMember: (memberId: string) => void;
   deleteGroup: (groupId?: string) => void;
   markCashPayment: (memberId: string, dateStr: string) => void;
@@ -858,7 +857,7 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (found) { setRole('member', found.id); return true; }
     return false;
   };
-  const inviteMember = (name: string, email: string, phone: string) => {
+   const inviteMember = async (name: string, email: string, phone: string) => {
     if (!group) {
       throw new Error('Please select or create a Susu group first before inviting members.');
     }
@@ -883,12 +882,42 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
       slotLocked: false
     };
     setMembers(prev => [...prev, newMember]);
+
+    // 👉 PASTE HERE - Save to Supabase for one-time use check
+    try {
+      const { supabase } = await import('../services/db');
+      if (supabase) {
+        await supabase.from('group_invites').insert({
+          group_id: group.id,
+          token: token,
+          invited_email: email || phone,
+          status: 'pending'
+        });
+      }
+    } catch (e) {
+      console.warn('Supabase invite save failed, but local invite still works', e);
+    }
+
     return { token, inviteUrl: `${window.location.origin}/invite/${token}`, uniqueCode: randomCode };
   };
 
-  const acceptInviteToken = (token: string, name: string, phone: string): boolean => {
+    const acceptInviteToken = (token: string, name: string, phone: string): boolean => {
     let found = false;
     setMembers(prev => prev.map(m => { if (m.inviteToken === token) { found = true; return {...m, name: name || m.name, phone: phone || m.phone, inviteStatus: 'active', slotLocked: true }; } return m; }));
+
+    // 👉 PASTE HERE - BURN THE LINK so it can't be used again
+    (async () => {
+      try {
+        const { supabase } = await import('../services/db');
+        if (supabase) {
+          await supabase.from('group_invites').update({ status: 'used' }).eq('token', token);
+          console.log('🔥 Link burned:', token);
+        }
+      } catch (e) {
+        console.warn('Burn failed', e);
+      }
+    })();
+
     return found;
   };
 
