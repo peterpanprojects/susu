@@ -44,8 +44,19 @@ export const AgentActivationPage: React.FC<AgentActivationPageProps> = ({ onNavi
   );
 
   const feeAmount = Number(platformPaymentConfig?.agentActivationFee ?? agentAccount.activationFeeAmount ?? 150);
-  // LIVE KEY - put your pk_live_... in .env
-  const PAYSTACK_PUBLIC_KEY = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || 'pk_live_YOUR_LIVE_KEY_HERE';
+  
+  // ✅ FIXED: Get REAL key from Supabase Super Admin config
+  const getValidPaystackKey = () => {
+    const candidates = [
+      platformPaymentConfig?.masterPublicKey,
+      platformPaymentConfig?.publicKey,
+      import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
+    ].filter(Boolean) as string[];
+    const valid = candidates.find(k => k && k.startsWith('pk_') && k.length > 30);
+    return valid || '';
+  };
+  
+  const PAYSTACK_PUBLIC_KEY = getValidPaystackKey();
 
   // Load Paystack LIVE script
   useEffect(() => {
@@ -55,10 +66,17 @@ export const AgentActivationPage: React.FC<AgentActivationPageProps> = ({ onNavi
       script.async = true;
       document.body.appendChild(script);
     }
-  }, []);
+    console.log('🔑 Activation Key Check:', PAYSTACK_PUBLIC_KEY ? PAYSTACK_PUBLIC_KEY.substring(0,25)+'...' : 'NO KEY!', 'Full config:', platformPaymentConfig);
+  }, [PAYSTACK_PUBLIC_KEY, platformPaymentConfig]);
 
   const handlePayActivation = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!PAYSTACK_PUBLIC_KEY || !PAYSTACK_PUBLIC_KEY.startsWith('pk_')) {
+      alert(`PAYSTACK KEY INVALID!\n\nCurrent: ${PAYSTACK_PUBLIC_KEY || 'EMPTY'}\n\nFix: Login as Super Admin → Payment Config → Paste REAL pk_live_ key from Paystack Dashboard → Save`);
+      return;
+    }
+
     setProcessing(true);
 
     if (!window.PaystackPop) {
@@ -85,7 +103,6 @@ export const AgentActivationPage: React.FC<AgentActivationPageProps> = ({ onNavi
         setProcessing(false);
       },
       callback: (response: any) => {
-        // REAL PAYMENT CONFIRMED BY PAYSTACK
         setProcessing(false);
         setActivated(true);
         activateAgentAccount(paymentMethod, response.reference);
@@ -103,7 +120,6 @@ export const AgentActivationPage: React.FC<AgentActivationPageProps> = ({ onNavi
   return (
     <div style={{ maxWidth: '680px', margin: '2.5rem auto', paddingBottom: '3rem' }}>
       <div className="card" style={{ padding: '2.5rem 2rem' }}>
-        {/* Brand Header */}
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
           <div className="brand-logo" style={{ display: 'inline-flex', background: 'var(--color-emerald-950)', padding: '0.65rem', borderRadius: '14px', marginBottom: '0.75rem', border: '1px solid rgba(229, 169, 60, 0.3)' }}>
             <ShieldCheck size={36} color="#E5A93C" />
@@ -177,8 +193,8 @@ export const AgentActivationPage: React.FC<AgentActivationPageProps> = ({ onNavi
               <button type="submit" className="btn-gold" disabled={processing} style={{ width: '100%', justifyContent: 'center', padding: '1rem', fontSize: '1.05rem', boxShadow: 'var(--shadow-md)' }}>
                 {processing ? <span>Opening Paystack LIVE...</span> : <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}><Lock size={18} /> Pay GH₵ {feeAmount} & Activate Agent Privileges</span>}
               </button>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginTop: '1rem', fontSize: '0.75rem', color: 'var(--color-slate-500)' }}>
-                <Lock size={12} /> {PAYSTACK_PUBLIC_KEY.startsWith('pk_live') ? 'LIVE MODE - Real Money' : 'TEST MODE - Set pk_live in .env'} | Secured by Paystack
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginTop: '1rem', fontSize: '0.7rem', color: PAYSTACK_PUBLIC_KEY ? 'var(--color-emerald-600)' : 'red', fontWeight: 600 }}>
+                <Lock size={12} /> {PAYSTACK_PUBLIC_KEY?.startsWith('pk_live') ? `LIVE MODE - ${PAYSTACK_PUBLIC_KEY.substring(0,22)}...` : PAYSTACK_PUBLIC_KEY ? `TEST MODE - ${PAYSTACK_PUBLIC_KEY.substring(0,22)}...` : '❌ NO VALID KEY - Set in Super Admin > Payment Config'} | Secured by Paystack
               </div>
             </form>
           </div>
