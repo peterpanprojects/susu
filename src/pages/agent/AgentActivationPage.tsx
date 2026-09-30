@@ -56,8 +56,10 @@ export const AgentActivationPage: React.FC<AgentActivationPageProps> = ({ onNavi
     return valid || '';
   };
   
-  const PAYSTACK_PUBLIC_KEY = getValidPaystackKey();
-
+    const PAYSTACK_PUBLIC_KEY = platformPaymentConfig.masterPublicKey 
+                           || platformPaymentConfig.publicKey
+                           || import.meta.env.VITE_PAYSTACK_PUBLIC_KEY
+                           || '';
   // Load Paystack LIVE script
   useEffect(() => {
     if (!window.PaystackPop) {

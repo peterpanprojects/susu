@@ -22,15 +22,12 @@ export const PaystackModal: React.FC<PaystackModalProps> = ({ isOpen, onClose, s
   const isOnlineDisabled =!agentPaymentConfig.allowPaystackOnline;
 
   const getValidPaystackKey = () => {
-  const candidates = [
-    platformPaymentConfig.masterPublicKey,
-    platformPaymentConfig.publicKey,
-    agentPaymentConfig.publicKey,
-    import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
-  ].filter(Boolean) as string[];
+  // OPTION 1: Single Master Paystack for ALL agents
+  const key = platformPaymentConfig.masterPublicKey 
+           || platformPaymentConfig.publicKey
+           || import.meta.env.VITE_PAYSTACK_PUBLIC_KEY;
 
-  const valid = candidates.find(k => k.startsWith('pk_') && k.length > 30);
-  return valid || '';
+  return key && key.startsWith('pk_') && key.length > 30 ? key : '';
 };
 
   const handleExecutePayment = () => {
