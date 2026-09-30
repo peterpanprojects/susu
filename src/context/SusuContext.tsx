@@ -66,6 +66,7 @@ export interface SusuContextType {
   updateMemberProfile: (memberId: string, partial: Partial<GroupMember>) => void;
   loginWithUniqueCode: (code: string) => boolean;
   inviteMember: (name: string, email: string, phone: string) => Promise<{ token: string; inviteUrl: string; uniqueCode: string }>;
+  acceptInviteToken: (token: string, name: string, phone: string) => boolean;
   removeMember: (memberId: string) => void;
   deleteGroup: (groupId?: string) => void;
   markCashPayment: (memberId: string, dateStr: string) => void;
