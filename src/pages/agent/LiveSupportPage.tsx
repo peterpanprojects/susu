@@ -217,7 +217,7 @@ export const LiveSupportPage: React.FC<LiveSupportPageProps> = ({ onNavigate: _o
           </div>
 
           <a
-            href="https://rezolv.io"
+            href="https://www.rezolv.dev/"
             target="_blank"
             rel="noopener noreferrer"
             style={{
