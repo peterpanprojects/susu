@@ -903,16 +903,41 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
     const acceptInviteToken = (token: string, name: string, phone: string): boolean => {
-    let found = false;
-    setMembers(prev => prev.map(m => { if (m.inviteToken === token) { found = true; return {...m, name: name || m.name, phone: phone || m.phone, inviteStatus: 'active', slotLocked: true }; } return m; }));
+    // Check if already used locally
+    const target = members.find(m => m.inviteToken === token);
+    if (!target) return false;
+    if (target.inviteStatus === 'active') return false; // already used!
 
-    // 👉 PASTE HERE - BURN THE LINK so it can't be used again
+    let found = false;
+    setMembers(prev => prev.map(m => { 
+      if (m.inviteToken === token) { 
+        found = true; 
+        // 🔥 BURN LOCAL - remove token so it can never be used again
+        return {
+          ...m, 
+          name: name || m.name, 
+          phone: phone || m.phone, 
+          inviteStatus: 'active', 
+          inviteToken: undefined, // <-- DELETE TOKEN LOCALLY
+          slotLocked: true 
+        }; 
+      } 
+      return m; 
+    }));
+
+    // 🔥 BURN ON SUPABASE
     (async () => {
       try {
         const { supabase } = await import('../services/db');
         if (supabase) {
+          // First check if already used
+          const { data: existing } = await supabase.from('group_invites').select('status').eq('token', token).single();
+          if (existing?.status === 'used') {
+            console.log('❌ Link already used!');
+            return;
+          }
           await supabase.from('group_invites').update({ status: 'used' }).eq('token', token);
-          console.log('🔥 Link burned:', token);
+          console.log('🔥 Link burned in DB:', token);
         }
       } catch (e) {
         console.warn('Burn failed', e);
