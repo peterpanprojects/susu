@@ -66,7 +66,7 @@ export interface SusuContextType {
   updateMemberProfile: (memberId: string, partial: Partial<GroupMember>) => void;
   loginWithUniqueCode: (code: string) => boolean;
   inviteMember: (name: string, email: string, phone: string) => Promise<{ token: string; inviteUrl: string; uniqueCode: string }>;
-  acceptInviteToken: (token: string, name: string, phone: string) => boolean;
+  acceptInviteToken: (token: string, name: string, phone: string) => Promise<boolean>;
   removeMember: (memberId: string) => void;
   deleteGroup: (groupId?: string) => void;
   markCashPayment: (memberId: string, dateStr: string) => void;
@@ -902,51 +902,58 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { token, inviteUrl: `${window.location.origin}/invite/${token}`, uniqueCode: randomCode };
   };
 
-    const acceptInviteToken = (token: string, name: string, phone: string): boolean => {
-    // Check if already used locally
-    const target = members.find(m => m.inviteToken === token);
-    if (!target) return false;
-    if (target.inviteStatus === 'active') return false; // already used!
+    const acceptInviteToken = async (token: string, name: string, phone: string): Promise<boolean> => {
+  try {
+    const { supabase } = await import('../services/db');
+    if (!supabase) return false;
 
-    let found = false;
+    // 1. Check group_invites table first
+    const { data: invite, error } = await supabase.from('group_invites').select('*').eq('token', token).single();
+    
+    if (error || !invite) {
+      console.log('Invite not found in DB');
+      return false;
+    }
+    if (invite.status === 'used') {
+      console.log('Link already used');
+      return false;
+    }
+
+    // 2. Burn it in DB
+    await supabase.from('group_invites').update({ status: 'used' }).eq('token', token);
+
+    // 3. Activate local member
     setMembers(prev => prev.map(m => { 
-      if (m.inviteToken === token) { 
-        found = true; 
-        // 🔥 BURN LOCAL - remove token so it can never be used again
+      if (m.inviteToken === token || m.id === invite.member_id) { 
         return {
           ...m, 
           name: name || m.name, 
           phone: phone || m.phone, 
           inviteStatus: 'active', 
-          inviteToken: undefined, // <-- DELETE TOKEN LOCALLY
+          inviteToken: undefined,
           slotLocked: true 
         }; 
       } 
       return m; 
     }));
 
-    // 🔥 BURN ON SUPABASE
-    (async () => {
-      try {
-        const { supabase } = await import('../services/db');
-        if (supabase) {
-          // First check if already used
-          const { data: existing } = await supabase.from('group_invites').select('status').eq('token', token).single();
-          if (existing?.status === 'used') {
-            console.log('❌ Link already used!');
-            return;
-          }
-          await supabase.from('group_invites').update({ status: 'used' }).eq('token', token);
-          console.log('🔥 Link burned in DB:', token);
-        }
-      } catch (e) {
-        console.warn('Burn failed', e);
-      }
-    })();
+    // 4. Also update members table in DB if you have it
+    try {
+      await supabase.from('members').update({ 
+        invite_status: 'active',
+        name: name,
+        phone: phone
+      }).eq('id', invite.member_id);
+    } catch(e) {}
 
-    return found;
-  };
+    console.log('🔥 Invite accepted and burned:', token);
+    return true;
 
+  } catch (e) {
+    console.error('Accept failed', e);
+    return false;
+  }
+};
   const removeMember = (memberId: string) => setMembers(prev => {
     const target = prev.find(m => m.id === memberId);
     if (!target) return prev;
