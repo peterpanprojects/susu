@@ -18,7 +18,7 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({ isOpen, on
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!group) {
       alert('Please create or select an active Susu group first.');
@@ -28,8 +28,7 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({ isOpen, on
       alert('Please provide member name and at least an email or phone number.');
       return;
     }
-    const result = inviteMember(name, email, phone);
-    setGeneratedInvite(result);
+  const result = await inviteMember(name, email, phone);
   };
 
   const handleCopyLink = () => {
