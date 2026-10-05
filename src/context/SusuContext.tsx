@@ -581,7 +581,7 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   }, []);
 
-  // 2. Load notifications from Supabase + Realtime (THIS IS NEW)
+    // Load from Supabase
   useEffect(() => {
     const fetchNotifs = async () => {
       try {
@@ -610,45 +610,58 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch(e){ console.warn(e) }
     };
     fetchNotifs();
+  }, [currentUserRole, activeMemberId]);
 
-    const setupRealtime = async () => {
-      try {
-        const { supabase } = await import('../services/db');
-        if (!supabase || currentUserRole !== 'member' || !activeMemberId) return;
-        const channel = supabase.channel(`notifs-${activeMemberId}`)
-          .on('postgres_changes', 
-            { event: 'INSERT', schema: 'public', table: 'notifications', filter: `member_id=eq.${activeMemberId}` }, 
-            (payload) => {
-              const d = payload.new as any;
-              const newNotif = {
-                id: d.id,
-                memberId: d.member_id,
-                groupId: d.group_id,
-                title: d.title,
-                description: d.description,
-                message: d.message,
-                type: d.type,
-                read: false,
-                time: new Date(d.created_at).toLocaleString(),
-                createdAt: Date.now()
-              };
-              setNotifications(prev => [newNotif as any, ...prev]);
-            }
-          ).subscribe();
-        return () => { supabase.removeChannel(channel); };
-      } catch(e){}
+  // Realtime - separate
+  useEffect(() => {
+    if (currentUserRole !== 'member' || !activeMemberId) return;
+    let channel: any;
+    (async () => {
+      const { supabase } = await import('../services/db');
+      if (!supabase) return;
+      channel = supabase.channel(`notifs-${activeMemberId}`)
+        .on('postgres_changes', 
+          { event: 'INSERT', schema: 'public', table: 'notifications', filter: `member_id=eq.${activeMemberId}` }, 
+          (payload) => {
+            const d = payload.new as any;
+            const newNotif = {
+              id: d.id,
+              memberId: d.member_id,
+              groupId: d.group_id,
+              title: d.title,
+              description: d.description,
+              message: d.message,
+              type: d.type,
+              read: false,
+              time: new Date(d.created_at).toLocaleString(),
+              createdAt: Date.now()
+            };
+            setNotifications(prev => {
+              if (prev.find(p => p.id === d.id)) return prev;
+              return [newNotif as any, ...prev];
+            });
+          }
+        ).subscribe();
+    })();
+    return () => {
+      if (channel) {
+        (async () => {
+          const { supabase } = await import('../services/db');
+          if (supabase) supabase.removeChannel(channel);
+        })();
+      }
     };
-    setupRealtime();
   }, [currentUserRole, activeMemberId]);
 
   useEffect(() => {
     if (!isDbLoaded) return;
     const timeout = setTimeout(() => {
-      const stateToSave = {
-        group, groups, activeGroupId, members, payments, posts,
-        agentAccount, agents, agentPaymentConfig, agentPaymentConfigs,
-        platformPaymentConfig, liveSupportConfig, notifications
-      };
+const stateToSave = {
+  group, groups, activeGroupId, members, payments, posts,
+  agentAccount, agents, agentPaymentConfig, agentPaymentConfigs,
+  platformPaymentConfig, liveSupportConfig
+  // notifications removed - Supabase is source of truth
+};
       localStorage.setItem('susu_current_role', currentUserRole);
       DatabaseService.persistState(stateToSave as any).catch(err => console.warn('DB sync:', err));
     }, 1000);
