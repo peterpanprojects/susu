@@ -581,7 +581,7 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   }, []);
 
-  // 2. Load notifications from Supabase + Realtime (THIS IS NEW)
+  // Load notifications from Supabase
   useEffect(() => {
     const fetchNotifs = async () => {
       try {
@@ -610,11 +610,19 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch(e){ console.warn(e) }
     };
     fetchNotifs();
+  }, [currentUserRole, activeMemberId]);
+
+  // Realtime notifications
+  useEffect(() => {
+    if (currentUserRole !== 'member' || !activeMemberId) return;
+
+    let cancelled = false;
+    let removeChannel: (() => void) | undefined;
 
     const setupRealtime = async () => {
       try {
         const { supabase } = await import('../services/db');
-        if (!supabase || currentUserRole !== 'member' || !activeMemberId) return;
+        if (!supabase || cancelled) return;
         const channel = supabase.channel(`notifs-${activeMemberId}`)
           .on('postgres_changes', 
             { event: 'INSERT', schema: 'public', table: 'notifications', filter: `member_id=eq.${activeMemberId}` }, 
@@ -632,13 +640,22 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 time: new Date(d.created_at).toLocaleString(),
                 createdAt: Date.now()
               };
-              setNotifications(prev => [newNotif as any, ...prev]);
+              setNotifications(prev => {
+                if (prev.some(notification => notification.id === d.id)) return prev;
+                return [newNotif as any, ...prev];
+              });
             }
           ).subscribe();
-        return () => { supabase.removeChannel(channel); };
-      } catch(e){}
+        removeChannel = () => { void supabase.removeChannel(channel); };
+        if (cancelled) removeChannel();
+      } catch(e){ console.warn(e) }
     };
     setupRealtime();
+
+    return () => {
+      cancelled = true;
+      removeChannel?.();
+    };
   }, [currentUserRole, activeMemberId]);
 
   useEffect(() => {
@@ -647,7 +664,7 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const stateToSave = {
         group, groups, activeGroupId, members, payments, posts,
         agentAccount, agents, agentPaymentConfig, agentPaymentConfigs,
-        platformPaymentConfig, liveSupportConfig, notifications
+        platformPaymentConfig, liveSupportConfig
       };
       localStorage.setItem('susu_current_role', currentUserRole);
       DatabaseService.persistState(stateToSave as any).catch(err => console.warn('DB sync:', err));
