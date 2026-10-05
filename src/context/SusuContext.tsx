@@ -273,13 +273,25 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setPlatformPaymentConfig(prev => ({...prev, agentActivationFee: settings.agentActivationFee?? prev.agentActivationFee }));
   };
 
-  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try { const parsed = JSON.parse(saved); if (parsed.notifications) return parsed.notifications; } catch {}
-    }
-    return INITIAL_NOTIFICATIONS;
-  });
+const [notifications, setNotifications] = useState<AppNotification[]>(() => {
+  // Try localStorage first for instant cross-role sharing
+  const localNotifs = localStorage.getItem('susu_notifications_v2');
+  if (localNotifs) {
+    try { return JSON.parse(localNotifs); } catch {}
+  }
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) {
+    try { const parsed = JSON.parse(saved); if (parsed.notifications) return parsed.notifications; } catch {}
+  }
+  return INITIAL_NOTIFICATIONS;
+});
+
+// Persist notifications to localStorage instantly (for member to see immediately)
+useEffect(() => {
+  try {
+    localStorage.setItem('susu_notifications_v2', JSON.stringify(notifications));
+  } catch {}
+}, [notifications]);
 
   const markNotificationAsRead = (id: string) => setNotifications(prev => prev.map(n => n.id === id? {...n, read: true } : n));
   const markAllNotificationsAsRead = () => setNotifications(prev => prev.map(n => ({...n, read: true })));
@@ -995,23 +1007,28 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const remindMember = (memberId: string) => {
-    const mem = members.find(m => m.id === memberId);
-    if (!mem ||!group) return;
-    const text = `Hi ${mem.name}, Agent reminded you: Please pay your ${group.currency}${group.fixedDailyAmount} today.`;
-    const newNotif = {
-      id: `notif-${Date.now()}`,
-      memberId: memberId,
-      groupId: mem.groupId,
-      type: 'payment_reminder',
-      title: 'Payment Reminder',
-      message: text,
-      description: text,
-      time: new Date().toISOString(),
-      read: false,
-      createdAt: Date.now(),
-    } as unknown as AppNotification;
-    setNotifications(prev => [newNotif,...prev]);
-  };
+  const mem = members.find(m => m.id === memberId);
+  if (!mem ||!group) return;
+  const text = `Hi ${mem.name}, Agent reminded you: Please pay your ${group.currency}${group.fixedDailyAmount} today.`;
+  const newNotif = {
+    id: `notif-${Date.now()}`,
+    memberId: memberId,
+    groupId: mem.groupId,
+    type: 'payment_reminder' as any,
+    title: 'Payment Reminder',
+    message: text,
+    description: text,
+    time: new Date().toLocaleString(),
+    read: false,
+    createdAt: Date.now(),
+  } as unknown as AppNotification;
+  setNotifications(prev => {
+    const next = [newNotif,...prev];
+    localStorage.setItem('susu_notifications_v2', JSON.stringify(next));
+    return next;
+  });
+  console.log("✅ Reminder sent to:", memberId, text);
+};
 
   const processPayment = (memberId: string, dates: string[], method: PaymentMethod, paystackRef?: string) => {
     const ref = paystackRef || generatePaystackReference();
