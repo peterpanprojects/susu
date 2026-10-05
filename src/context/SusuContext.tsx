@@ -556,6 +556,7 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [isDbLoaded, setIsDbLoaded] = useState(false);
 
+  // 1. Load main data from DB
   useEffect(() => {
     DatabaseService.loadState().then((dbState) => {
       setGroups(dbState.groups || (dbState.group? [dbState.group] : []));
@@ -580,7 +581,67 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   }, []);
 
-    useEffect(() => {
+  // 2. Load notifications from Supabase + Realtime (THIS IS NEW)
+  useEffect(() => {
+    const fetchNotifs = async () => {
+      try {
+        const { supabase } = await import('../services/db');
+        if (!supabase) return;
+        let query = supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(100);
+        if (currentUserRole === 'member' && activeMemberId) {
+          query = query.eq('member_id', activeMemberId);
+        }
+        const { data } = await query;
+        if (data && data.length > 0) {
+          const mapped = data.map((d: any) => ({
+            id: d.id,
+            memberId: d.member_id,
+            groupId: d.group_id,
+            title: d.title,
+            description: d.description,
+            message: d.message,
+            type: d.type,
+            read: d.read,
+            time: new Date(d.created_at).toLocaleString(),
+            createdAt: new Date(d.created_at).getTime()
+          }));
+          setNotifications(mapped as any);
+        }
+      } catch(e){ console.warn(e) }
+    };
+    fetchNotifs();
+
+    const setupRealtime = async () => {
+      try {
+        const { supabase } = await import('../services/db');
+        if (!supabase || currentUserRole !== 'member' || !activeMemberId) return;
+        const channel = supabase.channel(`notifs-${activeMemberId}`)
+          .on('postgres_changes', 
+            { event: 'INSERT', schema: 'public', table: 'notifications', filter: `member_id=eq.${activeMemberId}` }, 
+            (payload) => {
+              const d = payload.new as any;
+              const newNotif = {
+                id: d.id,
+                memberId: d.member_id,
+                groupId: d.group_id,
+                title: d.title,
+                description: d.description,
+                message: d.message,
+                type: d.type,
+                read: false,
+                time: new Date(d.created_at).toLocaleString(),
+                createdAt: Date.now()
+              };
+              setNotifications(prev => [newNotif as any, ...prev]);
+            }
+          ).subscribe();
+        return () => { supabase.removeChannel(channel); };
+      } catch(e){}
+    };
+    setupRealtime();
+  }, [currentUserRole, activeMemberId]);
+
+  useEffect(() => {
     if (!isDbLoaded) return;
     const timeout = setTimeout(() => {
       const stateToSave = {
@@ -940,10 +1001,27 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   };
 
-  const remindMember = (memberId: string) => {
+    const remindMember = async (memberId: string) => {
     const mem = members.find(m => m.id === memberId);
-    if (!mem ||!group) return;
+    if (!mem || !group) return;
     const text = `Hi ${mem.name}, Agent reminded you: Please pay your ${group.currency}${group.fixedDailyAmount} today.`;
+    
+    try {
+      const { supabase } = await import('../services/db');
+      if (supabase) {
+        await supabase.from('notifications').insert({
+          member_id: memberId,
+          group_id: mem.groupId,
+          title: 'Payment Reminder',
+          description: text,
+          message: text,
+          type: 'payment_reminder',
+          read: false
+        });
+      }
+    } catch(e){ console.error(e) }
+
+    // local fallback for immediate UI
     const newNotif = {
       id: `notif-${Date.now()}`,
       memberId: memberId,
@@ -956,14 +1034,10 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
       read: false,
       createdAt: Date.now(),
     } as unknown as AppNotification;
-    setNotifications(prev => {
-      const next = [newNotif,...prev];
-      localStorage.setItem('susu_notifications_v2', JSON.stringify(next));
-      return next;
-    });
+    setNotifications(prev => [newNotif, ...prev]);
   };
 
-  const sendAgentMessage = (groupId: string, memberId: string, message: string) => {
+  const sendAgentMessage = async (groupId: string, memberId: string, message: string) => {
     const newMsg: AgentMessage = {
       id: `msg-${Date.now()}`,
       agentId: activeAgentId || 'agent-1',
@@ -974,25 +1048,52 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
       createdAt: new Date().toISOString(),
       read: false,
     };
-    setAgentMessages(prev => [newMsg,...prev]);
-    const targetMembers = memberId === 'all'? members.filter(m => m.groupId === groupId) : members.filter(m => m.id === memberId);
+    setAgentMessages(prev => [newMsg, ...prev]);
+
+    const targetMembers = memberId === 'all' ? members.filter(m => m.groupId === groupId) : members.filter(m => m.id === memberId);
+    
+    // ✅ SAVE TO SUPABASE - NOW WORKS ON PHONE TOO
+    try {
+      const { supabase } = await import('../services/db');
+      if (supabase && targetMembers.length > 0) {
+        const payload = targetMembers.map(mem => ({
+          member_id: mem.id,
+          group_id: groupId,
+          agent_id: activeAgentId,
+          title: `Message from Agent`,
+          description: message.slice(0, 60) + (message.length > 60 ? '...' : ''),
+          message: message,
+          type: 'info',
+          read: false
+        }));
+        const { error } = await supabase.from('notifications').insert(payload);
+        if (error) console.error('Supabase notif error:', error);
+        
+        // Also save message itself if you created agent_messages table
+        await supabase.from('agent_messages').insert({
+          agent_id: activeAgentId,
+          group_id: groupId,
+          member_id: memberId,
+          message: message
+        }).then(()=>{}).catch(()=>{});
+      }
+    } catch(e){ console.error(e) }
+
+    // local fallback
     const notifs = targetMembers.map(mem => ({
       id: `notif-${Date.now()}-${mem.id}`,
       memberId: mem.id,
       groupId,
       type: 'info' as any,
       title: `Message from Agent`,
-      description: message.slice(0, 60) + (message.length > 60? '...' : ''),
+      description: message.slice(0, 60) + (message.length > 60 ? '...' : ''),
       message: message,
       time: new Date().toLocaleString(),
       read: false,
       createdAt: Date.now(),
     } as unknown as AppNotification));
-    setNotifications(prev => {
-      const next = [...notifs,...prev];
-      localStorage.setItem('susu_notifications_v2', JSON.stringify(next));
-      return next;
-    });
+    
+    setNotifications(prev => [...notifs, ...prev]);
   };
 
   const processPayment = (memberId: string, dates: string[], method: PaymentMethod, paystackRef?: string) => {
