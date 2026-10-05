@@ -70,6 +70,7 @@ export interface SusuContextType {
   removeMember: (memberId: string) => void;
   deleteGroup: (groupId?: string) => void;
   markCashPayment: (memberId: string, dateStr: string) => void;
+  remindMember: (memberId: string) => void;
   processPayment: (memberId: string, dates: string[], method: PaymentMethod, paystackRef?: string) => void;
   reorderCalendar: (fromIndex: number, toIndex: number) => void;
   shuffleCalendar: () => void;
@@ -993,6 +994,29 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   };
 
+    const remindMember = (memberId: string) => {
+    const mem = members.find(m => m.id === memberId);
+    if (!mem || !group) return;
+    
+    const text = `Hi ${mem.name}, Agent reminded you: Please pay your ${group.currency}${group.fixedDailyAmount} today.`;
+    
+    const newNotif = {
+      id: `notif-${Date.now()}`,
+      memberId: memberId,
+      groupId: mem.groupId,
+      type: 'payment_reminder',
+      title: 'Payment Reminder',
+      message: text,
+      description: text,  // <-- YOUR type needs this
+      time: new Date().toISOString(), // <-- YOUR type needs this
+      read: false,
+      createdAt: Date.now(),
+    } as unknown as AppNotification; // <-- This fixes the TS error
+    
+    setNotifications(prev => [newNotif, ...prev]);
+    console.log(`🔔 Reminder sent to ${mem.name}`);
+  };
+
   const processPayment = (memberId: string, dates: string[], method: PaymentMethod, paystackRef?: string) => {
     const ref = paystackRef || generatePaystackReference();
     const paidTimestamp = new Date().toISOString();
@@ -1006,6 +1030,8 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return updated;
     });
   };
+
+  const reorderCalendar = (fromIndex: number, toIndex: number) => {
 
   const reorderCalendar = (fromIndex: number, toIndex: number) => {
     if (!group) return;
@@ -1111,7 +1137,7 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setRole, createGroup, updateGroupSettings, updateAgentPaymentConfig, updatePlatformPaymentConfig, updatePlatformSettings,
       registerAgentKyc, activateAgentAccount, approveAgentKyc, rejectAgentKyc, updateAgentAccount, updateAgentKyc, deleteAgent,
       updateMemberProfile, loginWithUniqueCode, inviteMember, acceptInviteToken, removeMember, deleteGroup,
-      markCashPayment, processPayment, reorderCalendar, shuffleCalendar, addFeedPost, resetDemoData, resetSystemData,
+      markCashPayment, processPayment, reorderCalendar, remindMember, shuffleCalendar, addFeedPost, resetDemoData, resetSystemData,
       getMemberReliability, selectRotationSlot, liveSupportConfig, updateLiveSupportConfig,
       notifications, markNotificationAsRead, markAllNotificationsAsRead, addNotification, clearAllNotifications
     }}>
