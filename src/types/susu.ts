@@ -246,4 +246,15 @@ export interface AppNotification {
   groupId?: string;  // <-- add this
 }
 
+export interface AgentMessage {
+  id: string;
+  agentId: string;
+  groupId: string;
+  memberId: string; // 'all' for broadcast to whole group
+  senderRole: 'agent';
+  message: string;
+  createdAt: string;
+  read: boolean;
+}
+
 

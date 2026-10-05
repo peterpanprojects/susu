@@ -21,6 +21,18 @@ import { generatePayoutSchedule, reorderRotationQueue, shuffleFutureRotation } f
 import { generatePaystackReference } from '../utils/paystack';
 import { DatabaseService } from '../services/db';
 
+// --- FIX 1: Define AgentMessage here ---
+export interface AgentMessage {
+  id: string;
+  agentId: string;
+  groupId: string;
+  memberId: string; // 'all' or member.id
+  senderRole: 'agent';
+  message: string;
+  createdAt: string;
+  read: boolean;
+}
+
 export interface PlatformSettings {
   agentActivationFee: number;
   currency: string;
@@ -86,12 +98,15 @@ export interface SusuContextType {
   markAllNotificationsAsRead: () => void;
   addNotification: (notification: Omit<AppNotification, 'id' | 'read' | 'createdAt'>) => void;
   clearAllNotifications: () => void;
+  // FIX 2: Add messaging to type
+  agentMessages: AgentMessage[];
+  sendAgentMessage: (groupId: string, memberId: string, message: string) => void;
 }
 
-// One-time purge of legacy cached demo data from localStorage
-if (typeof window !== 'undefined') {
+// One-time purge
+if (typeof window!== 'undefined') {
   const DEMO_PURGE_FLAG = 'susu_demo_purged_v2';
-  if (localStorage.getItem(DEMO_PURGE_FLAG) !== 'true') {
+  if (localStorage.getItem(DEMO_PURGE_FLAG)!== 'true') {
     localStorage.removeItem('susu_platform_live_db_v1');
     localStorage.removeItem('susu_platform_live_db_v2');
     localStorage.removeItem('susu_agent_registry');
@@ -106,8 +121,8 @@ if (typeof window !== 'undefined') {
 }
 
 const STORAGE_KEY = 'susu_platform_live_db_v2';
-const AGENT_REGISTRY_KEY = 'susu_agent_registry_v2'; // Map of email -> AgentAccount for ALL agents
-const CURRENT_AGENT_ID_KEY = 'susu_current_agent_id'; // Email of currently logged-in agent
+const AGENT_REGISTRY_KEY = 'susu_agent_registry_v2';
+const CURRENT_AGENT_ID_KEY = 'susu_current_agent_id';
 const PLATFORM_SETTINGS_KEY = 'susu_platform_settings';
 
 const INITIAL_SUPER_ADMIN_USER: User = {
@@ -212,7 +227,6 @@ export const EMPTY_AGENT_ACCOUNT: AgentAccount = {
 };
 
 export const INITIAL_AGENTS: AgentAccount[] = [];
-
 export const INITIAL_AGENT_ACCOUNT: AgentAccount = EMPTY_AGENT_ACCOUNT;
 
 export const INITIAL_LIVE_SUPPORT_CONFIG: LiveSupportConfig = {
@@ -239,11 +253,8 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const setActiveMemberId = (id: string) => {
     setActiveMemberIdState(id);
-    if (id) {
-      localStorage.setItem('susu_active_member_id', id);
-    } else {
-      localStorage.removeItem('susu_active_member_id');
-    }
+    if (id) localStorage.setItem('susu_active_member_id', id);
+    else localStorage.removeItem('susu_active_member_id');
   };
 
   const [platformSettings, setPlatformSettings] = useState<PlatformSettings>(() => {
@@ -269,29 +280,26 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem(PLATFORM_SETTINGS_KEY, JSON.stringify(next));
       return next;
     });
-    // Also sync to platformPaymentConfig for backwards compat
     setPlatformPaymentConfig(prev => ({...prev, agentActivationFee: settings.agentActivationFee?? prev.agentActivationFee }));
   };
 
-const [notifications, setNotifications] = useState<AppNotification[]>(() => {
-  // Try localStorage first for instant cross-role sharing
-  const localNotifs = localStorage.getItem('susu_notifications_v2');
-  if (localNotifs) {
-    try { return JSON.parse(localNotifs); } catch {}
-  }
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) {
-    try { const parsed = JSON.parse(saved); if (parsed.notifications) return parsed.notifications; } catch {}
-  }
-  return INITIAL_NOTIFICATIONS;
-});
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
+    const localNotifs = localStorage.getItem('susu_notifications_v2');
+    if (localNotifs) {
+      try { return JSON.parse(localNotifs); } catch {}
+    }
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try { const parsed = JSON.parse(saved); if (parsed.notifications) return parsed.notifications; } catch {}
+    }
+    return INITIAL_NOTIFICATIONS;
+  });
 
-// Persist notifications to localStorage instantly (for member to see immediately)
-useEffect(() => {
-  try {
-    localStorage.setItem('susu_notifications_v2', JSON.stringify(notifications));
-  } catch {}
-}, [notifications]);
+  useEffect(() => {
+    try {
+      localStorage.setItem('susu_notifications_v2', JSON.stringify(notifications));
+    } catch {}
+  }, [notifications]);
 
   const markNotificationAsRead = (id: string) => setNotifications(prev => prev.map(n => n.id === id? {...n, read: true } : n));
   const markAllNotificationsAsRead = () => setNotifications(prev => prev.map(n => ({...n, read: true })));
@@ -310,7 +318,16 @@ useEffect(() => {
   });
   const updateLiveSupportConfig = (config: Partial<LiveSupportConfig>) => setLiveSupportConfig(prev => ({...prev,...config }));
 
-  // ── Multi-Agent Registry: each agent keyed by email ──
+  // --- Messaging State ---
+  const [agentMessages, setAgentMessages] = useState<AgentMessage[]>(() => {
+    const s = localStorage.getItem('susu_agent_messages');
+    return s? JSON.parse(s) : [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('susu_agent_messages', JSON.stringify(agentMessages));
+  }, [agentMessages]);
+
   const [agentRegistry, setAgentRegistry] = useState<Record<string, AgentAccount>>(() => {
     const regStr = localStorage.getItem(AGENT_REGISTRY_KEY);
     if (regStr) { try { return JSON.parse(regStr); } catch {} }
@@ -319,8 +336,6 @@ useEffect(() => {
 
   const [agents, setAgents] = useState<AgentAccount[]>(() => {
     const agentMap = new Map<string, AgentAccount>();
-
-    // 1. Layer on agents from old STORAGE_KEY
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
@@ -332,8 +347,6 @@ useEffect(() => {
         }
       } catch {}
     }
-
-    // 2. Layer on agents from registry (most recent data wins)
     const regStr = localStorage.getItem(AGENT_REGISTRY_KEY);
     if (regStr) {
       try {
@@ -342,7 +355,6 @@ useEffect(() => {
         registryAgents.forEach(a => { if (a.id) agentMap.set(a.id, a); });
       } catch {}
     }
-
     return Array.from(agentMap.values());
   });
 
@@ -368,14 +380,12 @@ useEffect(() => {
     setActiveAgentIdState(agentId);
     localStorage.setItem('susu_active_agent_id', agentId);
     localStorage.setItem('susu_current_agent_id', agentId);
-    // Also update current agent email in registry
     const agent = agents.find(a => a.id === agentId);
     if (agent?.email) {
       const emailKey = agent.email.toLowerCase();
       localStorage.setItem('susu_current_agent_email', emailKey);
       setCurrentAgentIdState(agentId);
     }
-    // STRICT MULTI-AGENT ISOLATION: Validate and switch activeGroupId to this agent's circle
     const agentGroups = groups.filter(g => g.agentId === agentId);
     if (agentGroups.length > 0) {
       const isCurrentValid = agentGroups.some(g => g.id === activeGroupId);
@@ -390,25 +400,19 @@ useEffect(() => {
   };
 
   const agentAccount: AgentAccount = (() => {
-    // 1. Try from agents array by activeAgentId
     if (activeAgentId) {
       const fromArray = agents.find(a => a.id === activeAgentId);
       if (fromArray) return fromArray;
     }
-    // 2. Try from registry by current email
     const currentEmail = localStorage.getItem(CURRENT_AGENT_ID_KEY);
     if (currentEmail && agentRegistry[currentEmail]) return agentRegistry[currentEmail];
-    // 3. Fallback
     return agents[0] || EMPTY_AGENT_ACCOUNT;
   })();
 
-  // ── Sync agents array to registry whenever agents change ──
   useEffect(() => {
     const updated: Record<string, AgentAccount> = {};
     agents.forEach(agent => {
-      if (agent.email) {
-        updated[agent.email.toLowerCase()] = agent;
-      }
+      if (agent.email) updated[agent.email.toLowerCase()] = agent;
     });
     setAgentRegistry(updated);
     localStorage.setItem(AGENT_REGISTRY_KEY, JSON.stringify(updated));
@@ -503,29 +507,22 @@ useEffect(() => {
   const myMembers = members.filter(m => m.groupId && myGroupIds.has(m.groupId));
   const myPayments = payments.filter(p => p.groupId && myGroupIds.has(p.groupId));
 
-  // STRICT MULTI-AGENT ISOLATION: Key agent payment configs per agent ID
   const [agentPaymentConfigs, setAgentPaymentConfigs] = useState<Record<string, AgentPaymentConfig>>(() => {
     const saved = localStorage.getItem('susu_agent_payment_configs');
-    if (saved) {
-      try { return JSON.parse(saved); } catch {}
-    }
+    if (saved) { try { return JSON.parse(saved); } catch {} }
     const legacy = localStorage.getItem(STORAGE_KEY);
     if (legacy) {
       try {
         const p = JSON.parse(legacy);
-        if (p.agentPaymentConfig) return { default: { ...INITIAL_AGENT_PAYMENT_CONFIG, ...p.agentPaymentConfig } };
+        if (p.agentPaymentConfig) return { default: {...INITIAL_AGENT_PAYMENT_CONFIG,...p.agentPaymentConfig } };
       } catch {}
     }
     return {};
   });
 
   const agentPaymentConfig: AgentPaymentConfig = (() => {
-    if (activeAgentId && agentPaymentConfigs[activeAgentId]) {
-      return agentPaymentConfigs[activeAgentId];
-    }
-    if (currentUserRole === 'member' && group?.agentId && agentPaymentConfigs[group.agentId]) {
-      return agentPaymentConfigs[group.agentId];
-    }
+    if (activeAgentId && agentPaymentConfigs[activeAgentId]) return agentPaymentConfigs[activeAgentId];
+    if (currentUserRole === 'member' && group?.agentId && agentPaymentConfigs[group.agentId]) return agentPaymentConfigs[group.agentId];
     return INITIAL_AGENT_PAYMENT_CONFIG;
   })();
 
@@ -533,10 +530,8 @@ useEffect(() => {
     const aid = activeAgentId || 'default';
     setAgentPaymentConfigs(prev => {
       const current = prev[aid] || INITIAL_AGENT_PAYMENT_CONFIG;
-      const updated = { ...prev, [aid]: { ...current, ...config } };
-      try {
-        localStorage.setItem('susu_agent_payment_configs', JSON.stringify(updated));
-      } catch {}
+      const updated = {...prev, [aid]: {...current,...config } };
+      try { localStorage.setItem('susu_agent_payment_configs', JSON.stringify(updated)); } catch {}
       return updated;
     });
   };
@@ -555,7 +550,6 @@ useEffect(() => {
   const [schedule, setSchedule] = useState<PayoutScheduleWeek[]>([]);
   useEffect(() => {
     if (!group) { setSchedule([]); return; }
-    // Strictly isolate rotation schedule to members of this specific group
     const groupMembers = members.filter(m => m.groupId === group.id);
     setSchedule(generatePayoutSchedule(group.id, group.cycleStartDate, groupMembers, group.fixedDailyAmount));
   }, [group, members]);
@@ -564,15 +558,15 @@ useEffect(() => {
 
   useEffect(() => {
     DatabaseService.loadState().then((dbState) => {
-      setGroups(dbState.groups || (dbState.group ? [dbState.group] : []));
+      setGroups(dbState.groups || (dbState.group? [dbState.group] : []));
       setMembers(dbState.members || []);
       setPayments(dbState.payments || []);
       setPosts(dbState.posts || []);
-      setAgents(dbState.agents || (dbState.agentAccount ? [dbState.agentAccount] : []));
+      setAgents(dbState.agents || (dbState.agentAccount? [dbState.agentAccount] : []));
       if (dbState.agentPaymentConfigs && Object.keys(dbState.agentPaymentConfigs).length > 0) {
-        setAgentPaymentConfigs(prev => ({ ...prev, ...dbState.agentPaymentConfigs }));
+        setAgentPaymentConfigs(prev => ({...prev,...dbState.agentPaymentConfigs }));
       } else if (dbState.agentPaymentConfig) {
-        setAgentPaymentConfigs(prev => ({ ...prev, default: dbState.agentPaymentConfig! }));
+        setAgentPaymentConfigs(prev => ({...prev, default: dbState.agentPaymentConfig! }));
       }
       if (dbState.platformPaymentConfig) {
         setPlatformPaymentConfig(dbState.platformPaymentConfig);
@@ -594,19 +588,16 @@ useEffect(() => {
         agentAccount, agents, agentPaymentConfig, agentPaymentConfigs,
         platformPaymentConfig, liveSupportConfig, notifications
       };
-      // Don't save to localStorage heavy object anymore - only role
       localStorage.setItem('susu_current_role', currentUserRole);
-      // Only sync important tables to supabase, debounced
       DatabaseService.persistState(stateToSave as any).catch(err => console.warn('DB sync:', err));
-    }, 1000); // wait 1 sec
+    }, 1000);
     return () => clearTimeout(timeout);
   }, [isDbLoaded, groups, members, payments, agents, platformPaymentConfig]);
 
-  // FIXED: Derive Active User correctly - Super Admin NEVER shows agent name
   const getActiveUser = (): User => {
     if (currentUserRole === 'super_admin') {
       return {
-       ...INITIAL_SUPER_ADMIN_USER,
+      ...INITIAL_SUPER_ADMIN_USER,
         name: 'Super Administrator',
         email: import.meta.env.VITE_SUPER_ADMIN_EMAIL || 'admin@susu.platform',
         role: 'super_admin',
@@ -621,7 +612,7 @@ useEffect(() => {
         email: agentAccount.email || INITIAL_AGENT_USER.email,
         phone: agentAccount.phone || INITIAL_AGENT_USER.phone,
         role: 'agent',
-        avatarUrl: agentAccount.avatarUrl || agentAccount.kycData?.selfieUrl || (agentAccount.email ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(agentAccount.email)}` : INITIAL_AGENT_USER.avatarUrl)
+        avatarUrl: agentAccount.avatarUrl || agentAccount.kycData?.selfieUrl || (agentAccount.email? `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(agentAccount.email)}` : INITIAL_AGENT_USER.avatarUrl)
       };
     }
     if (currentUserRole === 'visitor') {
@@ -643,7 +634,7 @@ useEffect(() => {
 
   const createGroup = (name: string, fixedDailyAmount: number, cycleStartDate?: string, currency?: string, agentId?: string): SusuGroup => {
     const currentAgentId = localStorage.getItem('susu_current_agent_id') || activeAgentId || '';
-    const assignedAgentId = agentId || (currentUserRole === 'agent' ? currentAgentId : (agentAccount?.id || agents[0]?.id || ''));
+    const assignedAgentId = agentId || (currentUserRole === 'agent'? currentAgentId : (agentAccount?.id || agents[0]?.id || ''));
     const newGroup: SusuGroup = {
       id: `group-${Date.now()}`,
       agentId: assignedAgentId,
@@ -655,7 +646,7 @@ useEffect(() => {
       createdAt: formatDateStr(new Date()),
       paystackPublicKey: ''
     };
-    setGroups(prev => [newGroup, ...prev]);
+    setGroups(prev => [newGroup,...prev]);
     setActiveGroupId(newGroup.id);
     DatabaseService.createGroup(newGroup).catch(err => console.error('DatabaseService createGroup error:', err));
     return newGroup;
@@ -664,13 +655,12 @@ useEffect(() => {
   const updateGroupSettings = (settings: Partial<SusuGroup>, groupId?: string) => {
     const targetId = groupId || activeGroupId || group?.id;
     if (!targetId) return;
-    setGroups(prev => prev.map(g => g.id === targetId ? { ...g, ...settings } : g));
+    setGroups(prev => prev.map(g => g.id === targetId? {...g,...settings } : g));
   };
 
   const updatePlatformPaymentConfig = async (config: Partial<SuperAdminPaymentConfig>) => {
     setPlatformPaymentConfig(prev => {
       const next = {...prev,...config };
-      // Save to Supabase immediately
       (async () => {
         try {
           const { supabase } = await import('../services/db');
@@ -684,22 +674,21 @@ useEffect(() => {
             secretKey: next.masterSecretKey || next.secretKey,
             webhookSecret: next.webhookSecret,
             environment: next.environment,
-            masterPublicKey: next.masterPublicKey || next.masterSecretKey ? next.masterPublicKey : next.publicKey,
+            masterPublicKey: next.masterPublicKey || next.secretKey? next.masterPublicKey : next.publicKey,
             masterSecretKey: next.masterSecretKey || next.secretKey,
             platformTreasuryAccount: (next as any).platformTreasuryAccount || '',
             globalPlatformFeePercent: next.globalPlatformFeePercent,
             agentActivationFee: next.agentActivationFee,
           };
           const { error } = await supabase
-            .from('payment_configs')
-            .upsert({ entity_type: 'super_admin', config: dbConfig }, { onConflict: 'entity_type' });
+           .from('payment_configs')
+           .upsert({ entity_type: 'super_admin', config: dbConfig }, { onConflict: 'entity_type' });
           if (error) console.error('Save error:', error);
-          else console.log('✅ Saved to payment_configs super_admin');
         } catch (e) { console.error(e); }
       })();
       return next;
     });
-    if (config.agentActivationFee !== undefined) {
+    if (config.agentActivationFee!== undefined) {
       updatePlatformSettings({ agentActivationFee: config.agentActivationFee });
     }
   };
@@ -707,16 +696,15 @@ useEffect(() => {
   const createAgent = (data: Partial<AgentAccount>): AgentAccount => {
     const newId = `agt-${Date.now()}`;
     const newAgent: AgentAccount = {
-      ...INITIAL_AGENT_ACCOUNT,
+     ...INITIAL_AGENT_ACCOUNT,
       id: newId,
       licenseNumber: `SUSU-AGT-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
       activationFeeAmount: platformSettings.agentActivationFee,
-      ...data
+     ...data
     };
-    setAgents(prev => [newAgent, ...prev]);
+    setAgents(prev => [newAgent,...prev]);
     setActiveAgentId(newId);
     localStorage.setItem('susu_current_agent_id', newId);
-    // Register in agent registry by email
     if (newAgent.email) {
       const emailKey = newAgent.email.toLowerCase();
       localStorage.setItem('susu_current_agent_email', emailKey);
@@ -728,10 +716,10 @@ useEffect(() => {
     setAgents(prev => prev.map(a => {
       if (a.id === activeAgentId) {
         return {
-          ...a,
+         ...a,
           kycData,
           isKycSubmitted: true,
-          licenseNumber: a.licenseNumber && !a.licenseNumber.includes('Pending') ? a.licenseNumber : `SUSU-AGT-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`
+          licenseNumber: a.licenseNumber &&!a.licenseNumber.includes('Pending')? a.licenseNumber : `SUSU-AGT-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`
         };
       }
       return a;
@@ -742,12 +730,12 @@ useEffect(() => {
     setAgents(prev => prev.map(a => {
       if (a.id === activeAgentId) {
         return {
-          ...a,
+         ...a,
           isActivated: true,
           activationPaidAt: new Date().toISOString(),
           activationTxRef: txRef,
           adminApprovalStatus: 'pending_admin_approval',
-          licenseNumber: a.licenseNumber && !a.licenseNumber.includes('Pending') ? a.licenseNumber : `SUSU-AGT-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`
+          licenseNumber: a.licenseNumber &&!a.licenseNumber.includes('Pending')? a.licenseNumber : `SUSU-AGT-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`
         };
       }
       return a;
@@ -758,11 +746,11 @@ useEffect(() => {
     setAgents(prev => prev.map(a => {
       if (a.id === agentId) {
         return {
-          ...a,
+         ...a,
           adminApprovalStatus: 'verified',
           adminApprovedAt: new Date().toISOString(),
           adminReviewNotes: notes || 'KYC verified and approved by Admin.',
-          licenseNumber: a.licenseNumber && !a.licenseNumber.includes('Pending') ? a.licenseNumber : `SUSU-AGT-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`
+          licenseNumber: a.licenseNumber &&!a.licenseNumber.includes('Pending')? a.licenseNumber : `SUSU-AGT-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`
         };
       }
       return a;
@@ -772,37 +760,27 @@ useEffect(() => {
   const rejectAgentKyc = (agentId: string, reason: string) => {
     setAgents(prev => prev.map(a => {
       if (a.id === agentId) {
-        return {
-          ...a,
-          adminApprovalStatus: 'rejected',
-          adminReviewNotes: reason
-        };
+        return {...a, adminApprovalStatus: 'rejected', adminReviewNotes: reason };
       }
       return a;
     }));
   };
 
-  const updateAgentAccount = (
-    agentIdOrPartial: string | Partial<AgentAccount>,
-    partial?: Partial<AgentAccount>
-  ) => {
+  const updateAgentAccount = (agentIdOrPartial: string | Partial<AgentAccount>, partial?: Partial<AgentAccount>) => {
     if (typeof agentIdOrPartial === 'string') {
       const targetId = agentIdOrPartial;
       const data = partial || {};
-      setAgents(prev => prev.map(a => a.id === targetId ? { ...a, ...data } : a));
+      setAgents(prev => prev.map(a => a.id === targetId? {...a,...data } : a));
     } else {
       const data = agentIdOrPartial;
       const targetId = data.id || activeAgentId;
-      setAgents(prev => prev.map(a => a.id === targetId ? { ...a, ...data } : a));
+      setAgents(prev => prev.map(a => a.id === targetId? {...a,...data } : a));
     }
   };
 
-  const updateAgentKyc = (
-    agentIdOrKyc: string | Partial<AgentKycData>,
-    kycData?: Partial<AgentKycData>
-  ) => {
-    const targetId = typeof agentIdOrKyc === 'string' ? agentIdOrKyc : activeAgentId;
-    const data = typeof agentIdOrKyc === 'string' ? (kycData || {}) : agentIdOrKyc;
+  const updateAgentKyc = (agentIdOrKyc: string | Partial<AgentKycData>, kycData?: Partial<AgentKycData>) => {
+    const targetId = typeof agentIdOrKyc === 'string'? agentIdOrKyc : activeAgentId;
+    const data = typeof agentIdOrKyc === 'string'? (kycData || {}) : agentIdOrKyc;
     setAgents(prev => prev.map(a => {
       if (a.id === targetId) {
         const existingKyc = a.kycData || {
@@ -818,52 +796,43 @@ useEffect(() => {
           maritalStatus: 'single' as const,
           status: 'verified' as const
         };
-        return { ...a, kycData: { ...existingKyc, ...data } };
+        return {...a, kycData: {...existingKyc,...data } };
       }
       return a;
     }));
   };
 
-  const deleteAgent = (
-    agentIdOrOptions?: string | { resetGroup?: boolean },
-    options?: { resetGroup?: boolean }
-  ) => {
+  const deleteAgent = (agentIdOrOptions?: string | { resetGroup?: boolean }, options?: { resetGroup?: boolean }) => {
     let targetId = activeAgentId;
     let shouldResetGroup = false;
-
     if (typeof agentIdOrOptions === 'string') {
       targetId = agentIdOrOptions;
-      shouldResetGroup = options?.resetGroup ?? false;
+      shouldResetGroup = options?.resetGroup?? false;
     } else if (agentIdOrOptions && typeof agentIdOrOptions === 'object') {
-      shouldResetGroup = agentIdOrOptions.resetGroup ?? false;
+      shouldResetGroup = agentIdOrOptions.resetGroup?? false;
     }
-
     const targetAgent = agents.find(a => a.id === targetId);
     if (targetAgent?.email) {
       setAgentRegistry(prev => {
-        const next = { ...prev };
+        const next = {...prev };
         delete next[targetAgent.email.toLowerCase()];
         localStorage.setItem(AGENT_REGISTRY_KEY, JSON.stringify(next));
         return next;
       });
     }
     DatabaseService.deleteAgent(targetId).catch(err => console.warn('Delete agent err:', err));
-
-    setAgents(prev => {
-      return prev.filter(a => a.id !== targetId);
-    });
-
+    setAgents(prev => prev.filter(a => a.id!== targetId));
     if (targetId === activeAgentId) {
-      const remaining = agents.filter(a => a.id !== targetId);
+      const remaining = agents.filter(a => a.id!== targetId);
       const nextId = remaining[0]?.id || '';
       setActiveAgentId(nextId);
     }
-
     if (shouldResetGroup) {
       const agentGroups = groups.filter(g => g.agentId === targetId);
       agentGroups.forEach(ag => deleteGroup(ag.id));
     }
   };
+
   const updateMemberProfile = (memberId: string, partial: Partial<GroupMember>) => setMembers(prev => prev.map(m => m.id === memberId? {...m,...partial } : m));
   const loginWithUniqueCode = (code: string): boolean => {
     const trimmed = code.trim().toUpperCase();
@@ -871,10 +840,9 @@ useEffect(() => {
     if (found) { setRole('member', found.id); return true; }
     return false;
   };
+
    const inviteMember = async (name: string, email: string, phone: string) => {
-    if (!group) {
-      throw new Error('Please select or create a Susu group first before inviting members.');
-    }
+    if (!group) throw new Error('Please select or create a Susu group first before inviting members.');
     const token = `invite-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
     const randomCode = `SUSU-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
     const newMemberId = `mem-${Date.now()}`;
@@ -896,8 +864,6 @@ useEffect(() => {
       slotLocked: false
     };
     setMembers(prev => [...prev, newMember]);
-
-    // 👉 PASTE HERE - Save to Supabase for one-time use check
     try {
       const { supabase } = await import('../services/db');
       if (supabase) {
@@ -909,73 +875,41 @@ useEffect(() => {
         });
       }
     } catch (e) {
-      console.warn('Supabase invite save failed, but local invite still works', e);
+      console.warn('Supabase invite save failed', e);
     }
-
     return { token, inviteUrl: `${window.location.origin}/invite/${token}`, uniqueCode: randomCode };
   };
 
-    const acceptInviteToken = async (token: string, name: string, phone: string): Promise<boolean> => {
-  try {
-    const { supabase } = await import('../services/db');
-    if (!supabase) return false;
-
-    // 1. Check group_invites table first
-    const { data: invite, error } = await supabase.from('group_invites').select('*').eq('token', token).single();
-    
-    if (error || !invite) {
-      console.log('Invite not found in DB');
-      return false;
-    }
-    if (invite.status === 'used') {
-      console.log('Link already used');
-      return false;
-    }
-
-    // 2. Burn it in DB
-    await supabase.from('group_invites').update({ status: 'used' }).eq('token', token);
-
-    // 3. Activate local member
-    setMembers(prev => prev.map(m => { 
-      if (m.inviteToken === token || m.id === invite.member_id) { 
-        return {
-          ...m, 
-          name: name || m.name, 
-          phone: phone || m.phone, 
-          inviteStatus: 'active', 
-          inviteToken: undefined,
-          slotLocked: true 
-        }; 
-      } 
-      return m; 
-    }));
-
-    // 4. Also update members table in DB if you have it
+  const acceptInviteToken = async (token: string, name: string, phone: string): Promise<boolean> => {
     try {
-      await supabase.from('members').update({ 
-        invite_status: 'active',
-        name: name,
-        phone: phone
-      }).eq('id', invite.member_id);
-    } catch(e) {}
+      const { supabase } = await import('../services/db');
+      if (!supabase) return false;
+      const { data: invite, error } = await supabase.from('group_invites').select('*').eq('token', token).single();
+      if (error ||!invite) return false;
+      if (invite.status === 'used') return false;
+      await supabase.from('group_invites').update({ status: 'used' }).eq('token', token);
+      setMembers(prev => prev.map(m => {
+        if (m.inviteToken === token) {
+          return {...m, name: name || m.name, phone: phone || m.phone, inviteStatus: 'active', inviteToken: undefined, slotLocked: true };
+        }
+        return m;
+      }));
+      return true;
+    } catch (e) {
+      console.error('Accept failed', e);
+      return false;
+    }
+  };
 
-    console.log('🔥 Invite accepted and burned:', token);
-    return true;
-
-  } catch (e) {
-    console.error('Accept failed', e);
-    return false;
-  }
-};
   const removeMember = (memberId: string) => setMembers(prev => {
     const target = prev.find(m => m.id === memberId);
     if (!target) return prev;
     const targetGroupId = target.groupId;
-    const remaining = prev.filter(m => m.id !== memberId);
+    const remaining = prev.filter(m => m.id!== memberId);
     let groupPos = 1;
     return remaining.map(m => {
       if (m.groupId === targetGroupId) {
-        const updated = { ...m, positionInRotation: groupPos };
+        const updated = {...m, positionInRotation: groupPos };
         groupPos++;
         return updated;
       }
@@ -986,12 +920,12 @@ useEffect(() => {
   const deleteGroup = (groupId?: string) => {
     const targetId = groupId || activeGroupId || group?.id;
     if (!targetId) return;
-    setGroups(prev => prev.filter(g => g.id !== targetId));
-    setMembers(prev => prev.filter(m => m.groupId !== targetId));
-    setPayments(prev => prev.filter(p => p.groupId !== targetId));
+    setGroups(prev => prev.filter(g => g.id!== targetId));
+    setMembers(prev => prev.filter(m => m.groupId!== targetId));
+    setPayments(prev => prev.filter(p => p.groupId!== targetId));
     DatabaseService.deleteGroup(targetId).catch(err => console.warn('DB delete group err:', err));
     if (activeGroupId === targetId) {
-      const remainingAgentGroups = groups.filter(g => g.id !== targetId && g.agentId === activeAgentId);
+      const remainingAgentGroups = groups.filter(g => g.id!== targetId && g.agentId === activeAgentId);
       setActiveGroupId(remainingAgentGroups[0]?.id || '');
     }
   };
@@ -1007,28 +941,59 @@ useEffect(() => {
   };
 
   const remindMember = (memberId: string) => {
-  const mem = members.find(m => m.id === memberId);
-  if (!mem ||!group) return;
-  const text = `Hi ${mem.name}, Agent reminded you: Please pay your ${group.currency}${group.fixedDailyAmount} today.`;
-  const newNotif = {
-    id: `notif-${Date.now()}`,
-    memberId: memberId,
-    groupId: mem.groupId,
-    type: 'payment_reminder' as any,
-    title: 'Payment Reminder',
-    message: text,
-    description: text,
-    time: new Date().toLocaleString(),
-    read: false,
-    createdAt: Date.now(),
-  } as unknown as AppNotification;
-  setNotifications(prev => {
-    const next = [newNotif,...prev];
-    localStorage.setItem('susu_notifications_v2', JSON.stringify(next));
-    return next;
-  });
-  console.log("✅ Reminder sent to:", memberId, text);
-};
+    const mem = members.find(m => m.id === memberId);
+    if (!mem ||!group) return;
+    const text = `Hi ${mem.name}, Agent reminded you: Please pay your ${group.currency}${group.fixedDailyAmount} today.`;
+    const newNotif = {
+      id: `notif-${Date.now()}`,
+      memberId: memberId,
+      groupId: mem.groupId,
+      type: 'payment_reminder' as any,
+      title: 'Payment Reminder',
+      message: text,
+      description: text,
+      time: new Date().toLocaleString(),
+      read: false,
+      createdAt: Date.now(),
+    } as unknown as AppNotification;
+    setNotifications(prev => {
+      const next = [newNotif,...prev];
+      localStorage.setItem('susu_notifications_v2', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const sendAgentMessage = (groupId: string, memberId: string, message: string) => {
+    const newMsg: AgentMessage = {
+      id: `msg-${Date.now()}`,
+      agentId: activeAgentId || 'agent-1',
+      groupId,
+      memberId,
+      senderRole: 'agent',
+      message,
+      createdAt: new Date().toISOString(),
+      read: false,
+    };
+    setAgentMessages(prev => [newMsg,...prev]);
+    const targetMembers = memberId === 'all'? members.filter(m => m.groupId === groupId) : members.filter(m => m.id === memberId);
+    const notifs = targetMembers.map(mem => ({
+      id: `notif-${Date.now()}-${mem.id}`,
+      memberId: mem.id,
+      groupId,
+      type: 'info' as any,
+      title: `Message from Agent`,
+      description: message.slice(0, 60) + (message.length > 60? '...' : ''),
+      message: message,
+      time: new Date().toLocaleString(),
+      read: false,
+      createdAt: Date.now(),
+    } as unknown as AppNotification));
+    setNotifications(prev => {
+      const next = [...notifs,...prev];
+      localStorage.setItem('susu_notifications_v2', JSON.stringify(next));
+      return next;
+    });
+  };
 
   const processPayment = (memberId: string, dates: string[], method: PaymentMethod, paystackRef?: string) => {
     const ref = paystackRef || generatePaystackReference();
@@ -1047,58 +1012,50 @@ useEffect(() => {
   const reorderCalendar = (fromIndex: number, toIndex: number) => {
     if (!group) return;
     const currentWeekIdx = schedule.findIndex(s => s.status === 'current');
-    const safeCurrentIdx = currentWeekIdx >= 0 ? currentWeekIdx : 0;
+    const safeCurrentIdx = currentWeekIdx >= 0? currentWeekIdx : 0;
     const groupMembers = members.filter(m => m.groupId === group.id);
     const reorderedGroupMembers = reorderRotationQueue(groupMembers, fromIndex, toIndex, safeCurrentIdx);
     setMembers(prev => {
-      const others = prev.filter(m => m.groupId !== group.id);
-      return [...others, ...reorderedGroupMembers];
+      const others = prev.filter(m => m.groupId!== group.id);
+      return [...others,...reorderedGroupMembers];
     });
   };
 
   const shuffleCalendar = () => {
     if (!group) return;
     const currentWeekIdx = schedule.findIndex(s => s.status === 'current');
-    const safeCurrentIdx = currentWeekIdx >= 0 ? currentWeekIdx : 0;
+    const safeCurrentIdx = currentWeekIdx >= 0? currentWeekIdx : 0;
     const groupMembers = members.filter(m => m.groupId === group.id);
     const shuffledGroupMembers = shuffleFutureRotation(groupMembers, safeCurrentIdx);
     setMembers(prev => {
-      const others = prev.filter(m => m.groupId !== group.id);
-      return [...others, ...shuffledGroupMembers];
+      const others = prev.filter(m => m.groupId!== group.id);
+      return [...others,...shuffledGroupMembers];
     });
   };
 
   const selectRotationSlot = (memberId: string, targetWeekNumber: number, roleOverride?: UserRole) => {
     const member = members.find(m => m.id === memberId);
     if (!member) return { success: false, message: 'Member not found' };
-
     const effectiveRole = roleOverride || currentUserRole;
     const isMemberRole = effectiveRole === 'member';
-    const isSlotLocked = member.slotLocked ?? (member.inviteStatus === 'active' && !!member.positionInRotation);
-
-    // If role is member and slot has already been selected/locked, prevent changes
+    const isSlotLocked = member.slotLocked?? (member.inviteStatus === 'active' &&!!member.positionInRotation);
     if (isMemberRole && isSlotLocked) {
-      return {
-        success: false,
-        message: 'Your rotation slot is permanently locked. Once a member selects a slot, it cannot be changed again. Please contact your Susu Agent Organizer if you require an adjustment.'
-      };
+      return { success: false, message: 'Your rotation slot is permanently locked. Contact your Agent.' };
     }
-
     const currentWeekIdx = schedule.findIndex(s => s.status === 'current');
-    const safeCurrentWeekNumber = currentWeekIdx >= 0 ? currentWeekIdx + 1 : 1;
+    const safeCurrentWeekNumber = currentWeekIdx >= 0? currentWeekIdx + 1 : 1;
     if (targetWeekNumber <= safeCurrentWeekNumber && currentWeekIdx >= 0) {
-      return { success: false, message: `Week #${targetWeekNumber} is active or completed and cannot be selected.` };
+      return { success: false, message: `Week #${targetWeekNumber} is active or completed.` };
     }
-
     setMembers(prevMembers => {
-      const occupant = prevMembers.find(m => m.groupId === member.groupId && m.positionInRotation === targetWeekNumber && m.id !== memberId);
+      const occupant = prevMembers.find(m => m.groupId === member.groupId && m.positionInRotation === targetWeekNumber && m.id!== memberId);
       return prevMembers.map(m => {
-        if (m.id === memberId) return { ...m, positionInRotation: targetWeekNumber, slotLocked: true };
-        if (occupant && m.id === occupant.id) return { ...m, positionInRotation: member.positionInRotation };
+        if (m.id === memberId) return {...m, positionInRotation: targetWeekNumber, slotLocked: true };
+        if (occupant && m.id === occupant.id) return {...m, positionInRotation: member.positionInRotation };
         return m;
       });
     });
-    return { success: true, message: `Successfully locked in Week #${targetWeekNumber}. Slot is confirmed.` };
+    return { success: true, message: `Successfully locked in Week #${targetWeekNumber}.` };
   };
 
   const addFeedPost = (title: string, body: string, visibility: 'public' | 'group') => {
@@ -1118,7 +1075,7 @@ useEffect(() => {
     setActiveAgentId('');
     setAgentPaymentConfigs({});
     try { localStorage.removeItem('susu_agent_payment_configs'); } catch {}
-    setPlatformPaymentConfig({ ...INITIAL_PLATFORM_PAYMENT_CONFIG, agentActivationFee: platformSettings.agentActivationFee });
+    setPlatformPaymentConfig({...INITIAL_PLATFORM_PAYMENT_CONFIG, agentActivationFee: platformSettings.agentActivationFee });
     setCurrentUserRole('visitor');
     setActiveMemberId('');
     localStorage.removeItem('susu_current_role');
@@ -1149,7 +1106,7 @@ useEffect(() => {
       registerAgentKyc, activateAgentAccount, approveAgentKyc, rejectAgentKyc, updateAgentAccount, updateAgentKyc, deleteAgent,
       updateMemberProfile, loginWithUniqueCode, inviteMember, acceptInviteToken, removeMember, deleteGroup,
       markCashPayment, processPayment, reorderCalendar, remindMember, shuffleCalendar, addFeedPost, resetDemoData, resetSystemData,
-      getMemberReliability, selectRotationSlot, liveSupportConfig, updateLiveSupportConfig,
+      getMemberReliability, selectRotationSlot, liveSupportConfig, updateLiveSupportConfig, agentMessages, sendAgentMessage,
       notifications, markNotificationAsRead, markAllNotificationsAsRead, addNotification, clearAllNotifications
     }}>
       {children}
