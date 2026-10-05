@@ -283,32 +283,134 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setPlatformPaymentConfig(prev => ({...prev, agentActivationFee: settings.agentActivationFee?? prev.agentActivationFee }));
   };
 
-  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
-    const localNotifs = localStorage.getItem('susu_notifications_v2');
-    if (localNotifs) {
-      try { return JSON.parse(localNotifs); } catch {}
-    }
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try { const parsed = JSON.parse(saved); if (parsed.notifications) return parsed.notifications; } catch {}
-    }
-    return INITIAL_NOTIFICATIONS;
-  });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+  // --- NOTIFICATIONS - SUPABASE ONLY FOR MEMBERS ---
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
   useEffect(() => {
+    if (currentUserRole === 'member') return; // members don't use localStorage
     try {
       localStorage.setItem('susu_notifications_v2', JSON.stringify(notifications));
     } catch {}
-  }, [notifications]);
+  }, [notifications, currentUserRole]);
 
-  const markNotificationAsRead = (id: string) => setNotifications(prev => prev.map(n => n.id === id? {...n, read: true } : n));
-  const markAllNotificationsAsRead = () => setNotifications(prev => prev.map(n => ({...n, read: true })));
+  // Load localStorage only for agent/super_admin on first load
+  useEffect(() => {
+    if (currentUserRole === 'member') return;
+    const local = localStorage.getItem('susu_notifications_v2');
+    if (local) {
+      try {
+        const parsed = JSON.parse(local);
+        if (parsed.length > 0) setNotifications(parsed);
+      } catch {}
+    }
+  }, []); // run once
+
+  const markNotificationAsRead = async (id: string) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    try {
+      const { supabase } = await import('../services/db');
+      if (supabase) await supabase.from('notifications').update({ read: true }).eq('id', id);
+    } catch {}
+  };
+  
+  const markAllNotificationsAsRead = async () => {
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    try {
+      const { supabase } = await import('../services/db');
+      if (!supabase) return;
+      if (currentUserRole === 'member' && activeMemberId) {
+        await supabase.from('notifications').update({ read: true }).eq('member_id', activeMemberId);
+      }
+    } catch {}
+  };
+  
   const addNotification = (notification: Omit<AppNotification, 'id' | 'read' | 'createdAt'>) => {
-    const newNotif: AppNotification = {...notification, id: `notif-${Date.now()}`, read: false, createdAt: Date.now() };
-    setNotifications(prev => [newNotif,...prev]);
+    const newNotif: AppNotification = { ...notification, id: `notif-${Date.now()}`, read: false, createdAt: Date.now() };
+    setNotifications(prev => [newNotif, ...prev]);
   };
   const clearAllNotifications = () => setNotifications([]);
-
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
   const [liveSupportConfig, setLiveSupportConfig] = useState<LiveSupportConfig>(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
@@ -576,7 +678,7 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
       if (dbState.liveSupportConfig) setLiveSupportConfig(dbState.liveSupportConfig);
-      if (dbState.notifications?.length) setNotifications(dbState.notifications);
+    
       setIsDbLoaded(true);
     });
   }, []);
