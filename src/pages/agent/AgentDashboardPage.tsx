@@ -11,7 +11,7 @@ interface AgentDashboardPageProps {
 }
 
 export const AgentDashboardPage: React.FC<AgentDashboardPageProps> = ({ onNavigate }) => {
-  const {
+ const {
     group,
     groups,
     myGroups,
@@ -22,7 +22,8 @@ export const AgentDashboardPage: React.FC<AgentDashboardPageProps> = ({ onNaviga
     payments,
     markCashPayment,
     agentAccount,
-    createGroup
+    createGroup,
+    remindMember // <-- PASTE HERE Line 23
   } = useSusu();
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [manualPayModalOpen, setManualPayModalOpen] = useState(false);
@@ -308,18 +309,37 @@ export const AgentDashboardPage: React.FC<AgentDashboardPageProps> = ({ onNaviga
                             <span className="status-pill missed">
                               <AlertCircle size={12} /> Missed
                             </span>
-                          ) : (
-                            <button
-                              className="status-pill pending"
-                              style={{ cursor: 'pointer' }}
-                              onClick={() => {
-                                setSelectedMemberForCash(mem.id);
-                                setManualPayModalOpen(true);
-                              }}
-                              title="Click to mark cash paid"
-                            >
-                              <Clock size={12} /> Pending
-                            </button>
+                                                   ) : (
+                            <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>
+                              <button
+                                className="status-pill pending"
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => {
+                                  setSelectedMemberForCash(mem.id);
+                                  setManualPayModalOpen(true);
+                                }}
+                                title="Click to mark cash paid"
+                              >
+                                <Clock size={12} /> Pending
+                              </button>
+                              <button
+                                onClick={() => {
+                                  remindMember(mem.id);
+                                }}
+                                style={{
+                                  fontSize: '0.7rem',
+                                  padding: '3px 8px',
+                                  borderRadius: '999px',
+                                  border: '1px solid #f59e0b',
+                                  background: '#fffbeb',
+                                  color: '#b45309',
+                                  cursor: 'pointer',
+                                  fontWeight: 600
+                                }}
+                              >
+                                🔔 Remind
+                              </button>
+                            </div>
                           )}
                         </td>
                       );

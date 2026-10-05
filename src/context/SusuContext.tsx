@@ -994,12 +994,10 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   };
 
-    const remindMember = (memberId: string) => {
+  const remindMember = (memberId: string) => {
     const mem = members.find(m => m.id === memberId);
-    if (!mem || !group) return;
-    
+    if (!mem ||!group) return;
     const text = `Hi ${mem.name}, Agent reminded you: Please pay your ${group.currency}${group.fixedDailyAmount} today.`;
-    
     const newNotif = {
       id: `notif-${Date.now()}`,
       memberId: memberId,
@@ -1007,14 +1005,12 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
       type: 'payment_reminder',
       title: 'Payment Reminder',
       message: text,
-      description: text,  // <-- YOUR type needs this
-      time: new Date().toISOString(), // <-- YOUR type needs this
+      description: text,
+      time: new Date().toISOString(),
       read: false,
       createdAt: Date.now(),
-    } as unknown as AppNotification; // <-- This fixes the TS error
-    
-    setNotifications(prev => [newNotif, ...prev]);
-    console.log(`🔔 Reminder sent to ${mem.name}`);
+    } as unknown as AppNotification;
+    setNotifications(prev => [newNotif,...prev]);
   };
 
   const processPayment = (memberId: string, dates: string[], method: PaymentMethod, paystackRef?: string) => {
@@ -1030,8 +1026,6 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return updated;
     });
   };
-
-  const reorderCalendar = (fromIndex: number, toIndex: number) => {
 
   const reorderCalendar = (fromIndex: number, toIndex: number) => {
     if (!group) return;
