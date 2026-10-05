@@ -236,11 +236,14 @@ export interface AppNotification {
   id: string;
   title: string;
   description: string;
+  message?: string; // <-- add this
   time: string;
-  type: 'sent' | 'warning' | 'received' | 'info';
+  type: 'sent' | 'warning' | 'received' | 'info' | 'payment_reminder'; // <-- added payment_reminder
   read: boolean;
   link?: string;
   createdAt: number;
+  memberId?: string; // <-- add this (who should receive)
+  groupId?: string;  // <-- add this
 }
 
 
