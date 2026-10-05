@@ -1070,15 +1070,17 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (error) console.error('Supabase notif error:', error);
         
         // Also save message itself if you created agent_messages table
-        await supabase.from('agent_messages').insert({
-          agent_id: activeAgentId,
-          group_id: groupId,
-          member_id: memberId,
-          message: message
-        }).then(()=>{}).catch(()=>{});
-      }
-    } catch(e){ console.error(e) }
-
+// ✅ CORRECT
+try {
+  await supabase.from('agent_messages').insert({
+    agent_id: activeAgentId,
+    group_id: groupId,
+    member_id: memberId,
+    message: message
+  });
+} catch (e) {
+  console.warn('agent_messages save failed', e);
+}
     // local fallback
     const notifs = targetMembers.map(mem => ({
       id: `notif-${Date.now()}-${mem.id}`,
