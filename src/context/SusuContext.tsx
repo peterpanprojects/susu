@@ -82,7 +82,7 @@ export interface SusuContextType {
   removeMember: (memberId: string) => void;
   deleteGroup: (groupId?: string) => void;
   markCashPayment: (memberId: string, dateStr: string) => void;
-  remindMember: (memberId: string) => void;
+  remindMember: (memberId: string) => Promise<void>;
   processPayment: (memberId: string, dates: string[], method: PaymentMethod, paystackRef?: string) => void;
   reorderCalendar: (fromIndex: number, toIndex: number) => void;
   shuffleCalendar: () => void;
@@ -100,7 +100,7 @@ export interface SusuContextType {
   clearAllNotifications: () => void;
   // FIX 2: Add messaging to type
   agentMessages: AgentMessage[];
-  sendAgentMessage: (groupId: string, memberId: string, message: string) => void;
+  sendAgentMessage: (groupId: string, memberId: string, message: string) => Promise<void>;
 }
 
 // One-time purge
