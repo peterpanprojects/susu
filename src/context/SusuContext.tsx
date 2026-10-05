@@ -1037,6 +1037,16 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setNotifications(prev => [newNotif, ...prev]);
   };
 
+
+
+
+
+
+
+
+
+
+
   const sendAgentMessage = async (groupId: string, memberId: string, message: string) => {
     const newMsg: AgentMessage = {
       id: `msg-${Date.now()}`,
@@ -1049,10 +1059,8 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
       read: false,
     };
     setAgentMessages(prev => [newMsg, ...prev]);
-
     const targetMembers = memberId === 'all' ? members.filter(m => m.groupId === groupId) : members.filter(m => m.id === memberId);
     
-    // ✅ SAVE TO SUPABASE - NOW WORKS ON PHONE TOO
     try {
       const { supabase } = await import('../services/db');
       if (supabase && targetMembers.length > 0) {
@@ -1061,40 +1069,27 @@ export const SusuProvider: React.FC<{ children: React.ReactNode }> = ({ children
           group_id: groupId,
           agent_id: activeAgentId,
           title: `Message from Agent`,
-          description: message.slice(0, 60) + (message.length > 60 ? '...' : ''),
+          description: message.slice(0, 60),
           message: message,
           type: 'info',
           read: false
         }));
-        const { error } = await supabase.from('notifications').insert(payload);
-        if (error) console.error('Supabase notif error:', error);
-        
-        // Also save message itself if you created agent_messages table
-// ✅ CORRECT
-try {
-  await supabase.from('agent_messages').insert({
-    agent_id: activeAgentId,
-    group_id: groupId,
-    member_id: memberId,
-    message: message
-  });
-} catch (e) {
-  console.warn('agent_messages save failed', e);
-}
-    // local fallback
+        await supabase.from('notifications').insert(payload);
+      }
+    } catch(e){ console.warn(e) }
+
     const notifs = targetMembers.map(mem => ({
       id: `notif-${Date.now()}-${mem.id}`,
       memberId: mem.id,
       groupId,
       type: 'info' as any,
       title: `Message from Agent`,
-      description: message.slice(0, 60) + (message.length > 60 ? '...' : ''),
+      description: message.slice(0, 60),
       message: message,
       time: new Date().toLocaleString(),
       read: false,
       createdAt: Date.now(),
     } as unknown as AppNotification));
-    
     setNotifications(prev => [...notifs, ...prev]);
   };
 
